@@ -1,0 +1,12 @@
+{
+    "extends": "@tsconfig/node18/tsconfig.json",
+    "display": "Node 18",
+
+    "compilerOptions": {
+        "module": "es2022",
+        "outDir": "dist"
+    },
+
+    "include": ["src/**/*"],
+    "exclude": ["node_modules", "**/*.spec.ts"]
+}

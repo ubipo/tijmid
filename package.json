@@ -1,0 +1,43 @@
+{
+  "name": "id.pfiers",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "main": "dist/main.mjs",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tsc && npm run copy-static",
+    "dev": "tsc-watch --onSuccess 'node ./dist/main.mjs --db id.pfiers.db --listen-socket 8000'",
+    "copy-static": "cp -r src/static dist"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@tsconfig/node18": "^1.0.0",
+    "@types/better-sqlite3": "^7.5.0",
+    "@types/cookie-parser": "^1.4.3",
+    "@types/express": "^4.17.13",
+    "@types/jsonwebtoken": "^8.5.8",
+    "@types/libsodium-wrappers": "^0.7.9",
+    "@types/oidc-provider": "^7.11.1",
+    "@types/uuid": "^8.3.4",
+    "cookie-parser": "^1.4.6",
+    "tsc-watch": "^5.0.3",
+    "typescript": "^4.8.0-dev.20220524"
+  },
+  "dependencies": {
+    "better-sqlite3": "^7.5.3",
+    "body-parser": "^1.20.0",
+    "chalk": "^5.0.1",
+    "commander": "^9.4.0",
+    "endent": "^2.1.0",
+    "express": "^4.18.1",
+    "express-rate-limit": "^6.5.1",
+    "helmet": "^5.1.0",
+    "jose": "^4.9.0",
+    "jsonwebtoken": "^8.5.1",
+    "libsodium-wrappers": "^0.7.10",
+    "oidc-provider": "^7.11.2",
+    "uuid": "^8.3.2"
+  }
+}
