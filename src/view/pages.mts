@@ -1,29 +1,51 @@
 import { page } from "./base.mjs";
 import { escapeHtml, html } from "./html.mjs"
-import { CrudConfig, CrudField, CrudFieldShown, CrudFieldType, CrudInput, Generated } from "../crudConfig.mjs";
-import { OidcClient, User } from "../model.mjs";
+import { CrudConfig, CrudField, CrudFieldShown, CrudFieldType, Generated, UICrudConfig } from "../crudConfig.mjs";
+import { LoginSession, OidcClient, User } from "../model.mjs";
 import { ErrorOut } from "oidc-provider";
-import { uuidToString } from "../util/uuidUtil.mjs";
+import { uuidToSlug, uuidToString } from "../util/uuidUtil.mjs";
+import { LoginSessionWithGrants } from "../db/loginSession.mjs";
+import { taiToISO8601 } from "../util/datetime.mjs";
+import { Ip2asn } from "../util/ip2asn.js";
+import { createSvgMap } from "./svgMap.js";
+import { extract } from "../util/array.js";
 
 
-const nav = (current: string) => {
-  const lis = [
-    ['/', 'Home'], ['/user', 'Users'], ['/client', 'Clients']
-  ].map(([href, name]) => {
-    if (name === current) return html`<li>${name}</li>`
-    return html`<li><a href="${href}">${name}</a></li>`
-  }).join('\n')
+const navList = (
+  currentPageName: string, routes: string[][]
+) => html`
+  <ul>
+    ${routes.map(([href, name]) => html`
+      <li>
+        ${name === currentPageName ? name : html`<a href="${href}">${name}</a>`}
+      </li>
+    `).join('\n')}
+  </ul>
+`
+
+const nav = (user: User, current: string) => {
+  const userNavRoutes = [
+    ['/', 'Home'],
+    ['/session', 'Sessions'],
+  ]
+  const adminNavRoutes = [
+    ['/user', 'Users'],
+    ['/client', 'Clients'],
+    ['/subrequest-domain', 'Subrequest Domains'],
+  ]
   return html`
     <nav>
-      <ul>
-        ${lis}
-      </ul>
+      ${navList(current, userNavRoutes)}
+      ${user.isAdmin
+        ? navList(current, adminNavRoutes)
+        : ''
+      }
     </nav>
   `
 }
 
 export const home = (user: User) => page("Home", html`
-  ${nav('Home')}
+  ${nav(user, 'Home')}
   <p>Logged in as: ${escapeHtml(user.username)}</p>
   <form method="post" action="/logout">
     <button type="submit">Logout</button>
@@ -164,7 +186,7 @@ export const consent = (
   return page("Consent", content)
 }
 
-function crudRow<T>(config: CrudConfig<T>, object: T) {
+function crudRow<T>(config: UICrudConfig<T>, object: T) {
   const fieldDataCalumns = config.fields
     .filter(f => f.shown === CrudFieldShown.InList)
     .map(f =>`<td>${escapeHtml(f.toDisplayString(object))}</td>`)
@@ -179,6 +201,27 @@ function crudRow<T>(config: CrudConfig<T>, object: T) {
       </td>
     </tr>
   `;
+}
+
+export function crudTable<T>(config: UICrudConfig<T>, objects: T[]) {
+  if (objects.length === 0) {
+    return html`<p><i>No ${config.titlePlural.toLowerCase()}</i></p>`
+  }
+
+  const fieldHeaders = config.fields
+    .filter(f => f.shown === CrudFieldShown.InList)
+    .map(f => html`<th>${escapeHtml(f.name)}</th>`)
+    .join('\n')
+  const dataRows = objects.map(o => crudRow(config, o)).join('\n')
+  return html`
+    <table>
+      <tr>
+        ${fieldHeaders}
+        <th>Actions</th>
+      </tr>
+      ${dataRows}
+    </table>
+  `
 }
 
 export function crudFieldToFormInputValueAttribute<T>(
@@ -235,26 +278,11 @@ function crudInputs<T>(config: CrudConfig<T>, existingObject?: T) {
     .join('\n')
 }
 
-export function crudList<T>(config: CrudConfig<T>, objects: T[]) {
-  const dataHeaders = config.fields
-    .filter(f => f.shown === CrudFieldShown.InList)
-    .map(f => f.name)
-  const ths = [...dataHeaders, 'Actions']
-    .map(headerString => html`<th>${headerString}</th>`)
-    .join('\n')
+export function crudList<T>(config: UICrudConfig<T>, user: User, objects: T[]) {
   return page(config.titlePlural , html`
-    ${nav(config.titlePlural)}
+    ${nav(user, config.titlePlural)}
     <h2>${config.titlePlural}</h2>
-    <table>
-      <thead>
-        <tr>
-          ${ths}
-        </tr>
-      </thead>
-      <tbody>
-        ${objects.map(o => crudRow(config, o)).join("")}
-      </tbody>
-    </table>
+    ${crudTable(config, objects)}
     <h2>Add ${config.title.toLowerCase()}</h2>
     <form method="post">
       ${crudInputs(config)}
@@ -329,4 +357,116 @@ export const oidcError = (
     <p>${infoMapHtml}</p>
     <img crossorigin="anonymous" src="/httpcat/${statusCode.toString()}.jpg">
   `)
+}
+
+export async function sessionDetails(
+  session: LoginSessionWithGrants,
+  ip2asn: Ip2asn,
+  countriesGeoJson: any,
+  extraButtons: string = ''
+) {
+  const ipAddressAs = await ip2asn.ipAddressToAs(session.ipAddress)
+  const asInfoStr = ipAddressAs != null
+    ? html`${ipAddressAs.countryCode} <i>${escapeHtml(ipAddressAs.asDescription)}</i>`
+    : html`<i>unknown location</i>`
+  const svgMap = ipAddressAs != null
+    ? createSvgMap(countriesGeoJson, ipAddressAs?.countryCode)
+    : null
+  
+  const sessionSummary = html`
+    <span>Created: ${taiToISO8601(session.created)}</span>
+    <span>IP address: ${session.ipAddress}</span>
+    <details open>
+      <summary>Location: ${asInfoStr}</summary>
+      ${svgMap ?? ''}
+    </details>
+  `
+
+  const subrequestDomainsDetails = session.subrequestDomains.length > 0
+    ? html`
+      <details open>
+        <summary>${String(session.subrequestDomains.length)} domain grants</summary>
+          <ul>
+          ${session.subrequestDomains.map(d => html`
+            <li>${d}</li>
+          `).join('\n')}
+          </ul>
+      </details>
+    `
+    : ''
+
+  return html`
+    ${sessionSummary}
+    ${subrequestDomainsDetails}
+    <div class="session-buttons">
+      <form method="post" action="session/${uuidToSlug(session.uuid)}/end">
+        <button type="submit">End session</button>
+      </form>
+      ${extraButtons}
+    </div>
+  `
+}
+
+export async function sessions(
+  user: User,
+  currentLoginSession: LoginSession,
+  loginSessionsWithGrants: LoginSessionWithGrants[],
+  ip2asn: Ip2asn,
+  countriesGeoJson: any
+) {
+  const [currentSessionWithGrants, otherSessions] = extract(
+    loginSessionsWithGrants,
+    s => s.uuid.equals(currentLoginSession.uuid)
+  )
+  return page("Sessions", html`
+    <style>
+      .session-details {
+        display: flex;
+        flex-direction: column;
+      }
+      .session-buttons { 
+        display: flex;
+        flex-direction: row;
+      }
+      .other-sessions {
+        padding-right: 1.2em;
+      }
+    </style>
+    ${nav(user, 'Sessions')}
+    <h2>Sessions</h2>
+    <section>
+      <h3>Current session</h3>
+      <div class="session-details">
+        ${await sessionDetails(
+          currentSessionWithGrants,
+          ip2asn,
+          countriesGeoJson,
+          otherSessions.length > 0
+            ? html`
+              <form method="post" action="session/end-all-others">
+                <button type="submit">End all other sessions</button>
+              </form>
+            `
+            : ''
+        )}
+      </div>
+    </section>
+    ${otherSessions.length > 0
+      ? html`
+        <section>
+          <h3>Other sessions</h3>
+          <ul class="other-sessions">
+          ${(await Promise.all(otherSessions.map(async (s) => html`
+            <li>
+              <div class="session-details">
+                ${await sessionDetails(s, ip2asn, countriesGeoJson)}
+              </div>
+            </li>
+          `))).join('\n')}
+          </ul>
+        </section>
+      `
+      : ''
+    }
+  `);
 }

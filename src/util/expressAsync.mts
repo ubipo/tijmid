@@ -1,5 +1,6 @@
-import express from "express"
 import core from "express-serve-static-core"
+import { RequestHandler } from "./expressTypes.mjs"
+
 
 export function expressAsync<
     P = core.ParamsDictionary,
@@ -8,11 +9,11 @@ export function expressAsync<
     ReqQuery = core.Query,
 >(
     block: (
-        ...args: Parameters<express.RequestHandler<P, ResBody, ReqBody, ReqQuery>>
+        ...args: Parameters<RequestHandler>
     ) => void | Promise<void>
 ) {
     return function asyncUtilWrap(
-        ...args: Parameters<express.RequestHandler<P, ResBody, ReqBody, ReqQuery>>
+        ...args: Parameters<RequestHandler>
     ) {
         const fnReturn = block(...args)
         const next = args[args.length - 1] as core.NextFunction

@@ -4,7 +4,10 @@
 
     "compilerOptions": {
         "module": "es2022",
-        "outDir": "dist"
+        "outDir": "dist",
+        "allowJs": true,
+        "checkJs": false,
+        "esModuleInterop": true,
     },
 
     "include": ["src/**/*"],

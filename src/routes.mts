@@ -1,35 +1,34 @@
 import { InvalidPasswordException, verifyPassword } from "./util/password.mjs"
 import { expressAsync } from "./util/expressAsync.mjs"
-import { Uuid, uuidFromString, uuidToString } from "./util/uuidUtil.mjs"
-import * as dbInvalidatedTokens from "./db/invalidatedTokens.mjs"
+import { slugToUuid, uuidFromString, uuidToString } from "./util/uuidUtil.mjs"
 import * as pages from "./view/pages.mjs"
 import { Database } from "better-sqlite3";
-import { RequestHandler, ErrorRequestHandler, Router, Response, Handler, Request } from "express";
+import { ErrorRequestHandler, Router, Request } from "express";
 import bodyParser from "body-parser"
 import { BadReq, ForbiddenReq, InternalServerError, NotFound, UnauthorizedReq } from "./util/ReqError.mjs"
-import { COOKIE_SEC_OPTIONS, createLoginJwtString, InvalidLoginJwtException, LoginRequired, LOGIN_JWT_KEY, LOGIN_TOKEN_MAXAGE, sessionFromLoginJwt } from "./util/jwt.mjs"
+import { COOKIE_SEC_OPTIONS, getSubrequestDomainJwtKey, InvalidLoginJwtException, LOGIN_SESSION_TOKEN_KEY, LOGIN_SESSION_TOKEN_MAXAGE } from "./util/jwt.mjs"
 import { Provider, errors as oidcErrors, InteractionResults, Configuration } from "oidc-provider"
 import { getParams } from "./util/params.mjs"
-import { CrudConfig } from "./crudConfig.mjs"
-import { crudEdit, crudGet, crudInsert, crudAll, crudDeletePK } from "./db/crud.mjs"
-import { User, clientCrudConfig, LastAdminException, userCrudConfig } from "./model.mjs"
+import { UICrudConfig } from "./crudConfig.mjs"
+import { crudEdit, crudGet, crudInsert, crudAll, crudDeletePK, crudDelete } from "./db/crud.mjs"
+import { User, clientCrudConfig, LastAdminException, userCrudConfig, subrequestDomainCrudConfig, loginSessionCrudConfig } from "./model.mjs"
 import { escapeHtml } from "./view/html.mjs"
 import endentImp from "endent";
+import { LoginRequired, SessionData, sessionDataFromToken } from "./util/session.mjs"
+import { RequestHandler, Response } from "./util/expressTypes.mjs"
+import { deleteAllLoginSessionsExcept, deleteLoginSessionByUuid, getLoginSessionsAndGrantsByUserUuid, insertLoginSession } from "./db/loginSession.mjs"
+import { Ip2asn } from "./util/ip2asn.js";
 const endent = (endentImp as any).default
 
 
 const NEXT_URL_QUERY_PARAM_KEY = 'n'
 
-interface Session {
-  user: User,
-  tokenUuid: Uuid,
-  tokenExp: number
-}
-
 function getSessionData(res: Response) {
-  const session = res.locals.session
-  if (session == null) throw new InternalServerError('No session', 'No session data found')
-  return session as Session
+  const sessionData = res.locals.sessionData
+  if (sessionData == null) {
+    throw new InternalServerError('No session', 'No session data found, try logging in again')
+  }
+  return sessionData as SessionData
 }
 
 async function getPostLoginDestination(
@@ -61,7 +60,7 @@ async function getPostLoginDestination(
 }
 
 async function login(
-  res: Response, db: Database, jwtSecret: string,
+  req: Request, res: Response, db: Database,
   username: string, password: string,
 ) {
   const user = crudGet(userCrudConfig, db, { username }, 'username = :username')
@@ -69,20 +68,24 @@ async function login(
   const hash = user.passwordHash
   const isValid = await verifyPassword(hash, password)
   if (!isValid) throw new UnauthorizedReq("Login", `wrong password`)
-  const jwtString = createLoginJwtString(jwtSecret, user)
-  res.cookie(LOGIN_JWT_KEY, jwtString, Object.assign({ maxAge: LOGIN_TOKEN_MAXAGE }, COOKIE_SEC_OPTIONS))
+  const loginSession = await insertLoginSession(db, user.uuid, req.ip)
+  res.cookie(LOGIN_SESSION_TOKEN_KEY, loginSession.token.toString('base64'), Object.assign({ maxAge: LOGIN_SESSION_TOKEN_MAXAGE }, COOKIE_SEC_OPTIONS))
   return user
 }
 
 function addCrudRoutes<T>(
-  config: CrudConfig<T>, db: Database, router: Router, ...handlers: Handler[]
+  config: UICrudConfig<T>,
+  db: Database,
+  router: Router,
+  ...handlers: RequestHandler[]
 ) {
   const urlencodedParser = bodyParser.urlencoded({ extended: false })
 
   router
     .get(config.collectionUrl, ...handlers, (_req, res) => {
+      const sessionData = getSessionData(res)
       const objects = crudAll(config, db)
-      res.send(pages.crudList(config, objects))
+      res.send(pages.crudList(config, sessionData.user, objects))
     })
     .post(config.collectionUrl, ...handlers, urlencodedParser, expressAsync(async (req, res) => {
       const object = await config.fromParams(req.body)
@@ -126,26 +129,29 @@ function addCrudRoutes<T>(
 }
 
 export async function createRouter(
-  db: Database, oidcProvider: Provider, oidcConfig: Configuration,
-  jwtSecret: string
+  db: Database,
+  ip2asn: Ip2asn,
+  countriesGeoJson: any,
+  oidcProvider: Provider,
+  oidcConfig: Configuration,
 ) {
   const urlencodedParser = bodyParser.urlencoded({ extended: false })
 
   const loginHandler: RequestHandler = (req, res, next) => {
-    const session = sessionFromLoginJwt(db, jwtSecret, req.cookies[LOGIN_JWT_KEY])
-    if (session instanceof LoginRequired) {
+    const sessionData = sessionDataFromToken(db, req.cookies[LOGIN_SESSION_TOKEN_KEY])
+    if (sessionData instanceof LoginRequired) {
       return res.redirect(
         302,
         `/login?${NEXT_URL_QUERY_PARAM_KEY}=${encodeURIComponent(req.url)}`
       )
     }
-    res.locals.session = session
+    res.locals.sessionData = sessionData
     next()
   }
 
   const adminHandler: RequestHandler = (_req, res, next) => {
-    const session = getSessionData(res)
-    if (!session.user.isAdmin) {
+    const sessionData = getSessionData(res)
+    if (!sessionData.user.isAdmin) {
       throw new ForbiddenReq('Forbidden', 'Administrator privileges required')
     }
     next()
@@ -153,14 +159,14 @@ export async function createRouter(
 
   const router: Router = Router()
     .get("/login", expressAsync(async (req, res) => {
-      const session = sessionFromLoginJwt(db, jwtSecret, req.cookies[LOGIN_JWT_KEY])
-      if (session instanceof LoginRequired) {
+      const sessionData = sessionDataFromToken(db, req.cookies[LOGIN_SESSION_TOKEN_KEY])
+      if (sessionData instanceof LoginRequired) {
         res.send(pages.login())
         return
       }
       const nextUrlParam = req.query[NEXT_URL_QUERY_PARAM_KEY]
       const destination = await getPostLoginDestination(
-        req, res, oidcProvider, nextUrlParam as string, session.user
+        req, res, oidcProvider, nextUrlParam as string, sessionData.user
       )
       res.redirect(303, destination)
     }))
@@ -169,7 +175,7 @@ export async function createRouter(
         "Login", req.body, ["username", "password"]
       )
       const nextUrlParam = req.query[NEXT_URL_QUERY_PARAM_KEY]
-      const user = await login(res, db, jwtSecret, username, password)
+      const user = await login(req, res, db, username, password)
       const destination = await getPostLoginDestination(
         req, res, oidcProvider, nextUrlParam as string, user
       )
@@ -182,12 +188,13 @@ export async function createRouter(
       const session = getSessionData(res)
       res.send(pages.home(session.user))
     })
-    .post('/logout', loginHandler, (_req, res) => {
-      const session = getSessionData(res)
-      dbInvalidatedTokens.invalidate(db, session.tokenUuid, session.tokenExp)
-      res.clearCookie(LOGIN_JWT_KEY)
+    .post('/logout', loginHandler, expressAsync(async (_req, res) => {
+      const sessionData = getSessionData(res)
+      const token = sessionData.loginSession.token
+      await crudDelete(loginSessionCrudConfig, db, { token }, 'token = :token')
+      res.clearCookie(LOGIN_SESSION_TOKEN_KEY)
       res.redirect('/')
-    })
+    }))
     .get('/consent', loginHandler, expressAsync(async (req, res) => {
       const { prompt, params } = await oidcProvider.interactionDetails(req, res);
       const clientId = params.client_id
@@ -243,9 +250,11 @@ export async function createRouter(
       const session = getSessionData(res)
       const loggedInUserUuid = session.user.uuid
       const interactionUserUuid = uuidFromString(accountId)
-      if (!loggedInUserUuid.equals(interactionUserUuid)) throw new BadReq(
-        'Wrong user', 'Logged-in user is not the same one that started the OAuth flow'
-      )
+      if (!loggedInUserUuid.equals(interactionUserUuid)) {
+        const msg = 'Logged-in user is not the same one that started the OAuth flow'
+        console.error(`${msg} loggedIn: ${uuidToString(loggedInUserUuid)}, interaction: ${uuidToString(interactionUserUuid)}`)
+        throw new BadReq('Wrong user', msg)
+      }
 
       let { grantId } = interactionDetails;
       let grant;
@@ -288,10 +297,44 @@ export async function createRouter(
 
       await oidcProvider.interactionFinished(req, res, result, { mergeWithLastSubmission: true });
     }))
+    .get('/session', loginHandler, expressAsync(async (req, res) => {
+      const sessionData = getSessionData(res)
+      const loginSessionsWithGrants = getLoginSessionsAndGrantsByUserUuid(db, sessionData.user.uuid)
+      const sessionsPage = await pages.sessions(
+        sessionData.user,
+        sessionData.loginSession,
+        loginSessionsWithGrants,
+        ip2asn,
+        countriesGeoJson
+      )
+      res.send(sessionsPage)
+    }))
+    .post('/session/:slug/end', loginHandler, expressAsync(async (req, res) => {
+      const sessionData = getSessionData(res)
+      const sessionToEndUuid = slugToUuid(req.params.slug)
+      deleteLoginSessionByUuid(db, sessionData.user.uuid, sessionToEndUuid)
+      res.redirect('/session')
+    }))
+    .post('/session/end-all-others', loginHandler, expressAsync(async (req, res) => {
+      const sessionData = getSessionData(res)
+      deleteAllLoginSessionsExcept(
+        db, sessionData.user.uuid, sessionData.loginSession.uuid
+      )
+      res.redirect('/session')
+    }))
+    .get('/subrequest-auth', expressAsync(async (req, res) => {
+      console.log('subrequest-auth')
+      console.log(req.headers)
+      // TODO: Domain hardcoded
+      res.cookie(getSubrequestDomainJwtKey('id.pfiers.net'), 'ffff', COOKIE_SEC_OPTIONS)
+      res.send('ok')
+      console.log('sent ok')
+    }))
 
   // Admin routes
   addCrudRoutes(userCrudConfig, db, router, loginHandler, adminHandler)
   addCrudRoutes(clientCrudConfig, db, router, loginHandler, adminHandler)
+  addCrudRoutes(subrequestDomainCrudConfig, db, router, loginHandler, adminHandler)
 
   const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
     if (err instanceof LastAdminException) {
@@ -305,7 +348,7 @@ export async function createRouter(
         `Chosen password is invalid: ${err.reason}`
       ))
     } else if (err instanceof InvalidLoginJwtException) {
-      res.clearCookie(LOGIN_JWT_KEY)
+      res.clearCookie(LOGIN_SESSION_TOKEN_KEY)
       return next(new BadReq(
         'Invalid Login Token',
         `Login token is invalid.\nCookie has been cleared. Please reload.`

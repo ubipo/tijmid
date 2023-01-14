@@ -1,6 +1,7 @@
-import { CrudConfig, CrudField, CrudFieldShown, CrudFieldType, Generated, Required } from "./crudConfig.mjs";
+import { CrudConfig, CrudField, CrudFieldShown, CrudFieldType, Generated, Required, UICrudConfig } from "./crudConfig.mjs";
 import { isLastAdmin } from "./db/lastAdmin.mjs";
-import { generateUuid, slugToUuid, Uuid, uuidToSlug } from "./util/uuidUtil.mjs";
+import { normalizeDomain } from "./util/domains.mjs";
+import { generateUuid, slugToUuid, Uuid, uuidToSlug, uuidToString } from "./util/uuidUtil.mjs";
 
 
 export interface User {
@@ -15,7 +16,7 @@ export interface User {
 
 export class LastAdminException extends Error { name = this.constructor.name }
 
-export const userCrudConfig = new CrudConfig<User>(
+export const userCrudConfig = new UICrudConfig<User>(
   'User',
   'Users',
   u => u.username,
@@ -55,7 +56,7 @@ export interface OidcClient {
   requirePkce: boolean
 }
 
-export const clientCrudConfig = new CrudConfig<OidcClient>(
+export const clientCrudConfig = new UICrudConfig<OidcClient>(
   'Client',
   'Clients',
   c => c.name,
@@ -73,4 +74,44 @@ export const clientCrudConfig = new CrudConfig<OidcClient>(
     requirePkce:            new CrudField('Require PKCE',              'requirePkce',  CrudFieldType.Bool,      Required),
   },
   'uuid = :uuid'
+)
+
+export interface SubrequestDomain {
+  domain: string
+}
+
+export const subrequestDomainCrudConfig = new UICrudConfig<SubrequestDomain>(
+  'Subrequest Domain',
+  'Subrequest Domains',
+  c => c.domain,
+  '/subrequest-domain',
+  '/subrequest-domain/:domain',
+  c => `/subrequest-domain/${encodeURIComponent(c.domain)}`,
+  urlParams => ({ domain: decodeURIComponent(urlParams.domain) }),
+  {
+    domain: new CrudField('Domain', 'domain', CrudFieldType.String, Required, CrudFieldShown.InList, normalizeDomain),
+  },
+  'domain = :domain'
+)
+
+export interface LoginSession {
+  uuid: Uuid
+  token: Buffer
+  user: Uuid
+  created: number
+  ipAddress: string
+}
+
+export const loginSessionCrudConfig = new CrudConfig<LoginSession>(
+  'Login Session',
+  'Login Sessions',
+  c => uuidToString(c.uuid),
+  {
+    uuid:      new CrudField('UUID',       'uuid',      CrudFieldType.Uuid,      new Generated(generateUuid), CrudFieldShown.ForIdentification),
+    token:     new CrudField('Token',      'token',     CrudFieldType.String,    Required),
+    user:      new CrudField('User',       'user',      CrudFieldType.Uuid,      Required),
+    created:   new CrudField('Created',    'created',   CrudFieldType.Timestamp, Required),
+    ipAddress: new CrudField('IP Address', 'ipAddress', CrudFieldType.String,    Required),
+  },
+  'domain = :domain'
 )

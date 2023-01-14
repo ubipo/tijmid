@@ -34,6 +34,14 @@ export function page(pageTitle: string, content: string) {
           list-style: none;
           column-gap: 0.5em;
           padding: 0;
+          margin-top: 0;
+          margin-bottom: 0;
+        }
+        nav > ul:first-child {
+          margin-top: 1em;
+        }
+        nav > ul:last-child {
+          margin-bottom: 1em;
         }
         form > button {
           margin-right: 1em;

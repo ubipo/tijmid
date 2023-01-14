@@ -14,50 +14,58 @@ const MIGRATIONS = (db: Database) => [
     db.exec(sql`
       CREATE TABLE user (
         uuid BLOB PRIMARY KEY,
-        username STRING UNIQUE NOT NULL,
-        password_hash STRING NOT NULL,
-        is_admin BOOL DEFAULT FALSE NOT NULL,
-        full_name STRING,
-        nickname STRING,
-        email STRING
-      );
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        is_admin INTEGER DEFAULT FALSE NOT NULL,
+        full_name TEXT,
+        nickname TEXT,
+        email TEXT
+      ) WITHOUT ROWID, STRICT;
       CREATE TABLE secret (
-        key STRING PRIMARY KEY,
-        value STRING NOT NULL
-      );
-    `)
-    db.exec(sql`
-      CREATE TABLE invalidated_tokens (
-        uuid BLOB PRIMARY KEY,
-        expiration UNSIGNED BIG INT NOT NULL
-      )
-    `)
-    db.exec(sql`
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      ) WITHOUT ROWID, STRICT;
       CREATE TABLE oidc_data (
-        model STRING,
-        id STRING,
-        payload STRING NOT NULL,
-        session_uid STRING,
-        user_code STRING,
-        grant_id STRING,
-        consumed BOOL NOT NULL DEFAULT FALSE,
-        expiration UNSIGNED BIG INT NOT NULL,
+        model TEXT,
+        id TEXT,
+        payload TEXT NOT NULL,
+        session_uid TEXT,
+        user_code TEXT,
+        grant_id TEXT,
+        consumed INTEGER NOT NULL DEFAULT FALSE,
+        expiration INTEGER NOT NULL,
         PRIMARY KEY (model, id)
-      )
-    `)
-    db.exec(sql`
+      );
       CREATE TABLE client (
         uuid BLOB PRIMARY KEY,
-        id STRING,
-        name STRING NOT NULL,
-        secret STRING NOT NULL,
-        redirect_uris STRING NOT NULL,
-        post_logout_redirect_uris STRING NOT NULL,
-        require_pkce BOOL NOT NULL DEFAULT TRUE,
+        id TEXT,
+        name TEXT NOT NULL,
+        secret TEXT NOT NULL,
+        redirect_uris TEXT NOT NULL,
+        post_logout_redirect_uris TEXT NOT NULL,
+        require_pkce INTEGER NOT NULL DEFAULT TRUE,
         UNIQUE(id, secret)
-      )
+      ) WITHOUT ROWID, STRICT;
+      CREATE TABLE login_session (
+        uuid BLOB PRIMARY KEY,
+        token BLOB NOT NULL,
+        user BLOB NOT NULL,
+        created INTEGER NOT NULL,
+        ip_address TEXT NOT NULL,
+        FOREIGN KEY (user) REFERENCES user (uuid)
+      ) WITHOUT ROWID, STRICT;
+      CREATE TABLE subrequest_domain (
+        domain TEXT PRIMARY KEY
+      ) WITHOUT ROWID, STRICT;
+      CREATE TABLE login_session_subrequest_domain (
+        login_session BLOB NOT NULL,
+        subrequest_domain TEXT NOT NULL,
+        FOREIGN KEY (login_session) REFERENCES login_session (uuid),
+        FOREIGN KEY (subrequest_domain) REFERENCES subrequest_domain (domain),
+        PRIMARY KEY (login_session, subrequest_domain)
+      ) WITHOUT ROWID, STRICT;
     `)
-  }
+  },
 ]
 
 export function migrate(db: Database) {
