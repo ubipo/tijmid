@@ -3,6 +3,17 @@ import { CrudConfig } from "../crudConfig.mjs";
 import { sql } from "./sql.mjs";
 
 
+export function crudColumnsClausePart<T>(
+  config: CrudConfig<T>,
+  tableAlias: string = ''
+) {
+  return config.fields.map(f => {
+    return tableAlias.length > 0
+      ? `${tableAlias}.${f.dbColumnName} ${tableAlias}_${f.dbColumnName}`
+      : f.dbColumnName
+  }).join(', ')
+}
+
 export function crudAll<T>(config: CrudConfig<T>, db: Database) {
   const rows = db.prepare(sql`SELECT * FROM ${config.dbTableName}`).all()
   return rows.map(r => config.fromDbRow(r))
@@ -22,11 +33,10 @@ export function crudGet<T>(
 export async function crudInsert<T>(
   config: CrudConfig<T>, db: Database, object: T
 ) {
-  const columnsClause = config.fields.map(f => f.dbColumnName).join(', ')
   const valuesClause = config.fields
     .map(f => `:${f.dbPlaceholderName}`).join(', ')
   db.prepare(sql`
-    INSERT INTO ${config.dbTableName} (${columnsClause})
+    INSERT INTO ${config.dbTableName} (${crudColumnsClausePart(config)})
     VALUES (${valuesClause})
   `).run(config.toDbRow(object))
 }
@@ -57,7 +67,7 @@ export function crudDeletePK<T>(
   return result.changes === 1
 }
 
-export function crudDelete<T>(
+export async function crudDelete<T>(
   config: CrudConfig<T>, db: Database, whereParams: Record<string, any>,
   whereClause = config.dbPkWhereClause
 ) {

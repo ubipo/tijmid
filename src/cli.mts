@@ -82,7 +82,7 @@ function createCrudSubcommand<T>(
     const idText = config.fields.filter(f => f.showForIdentification).map(
       f => `${f.name}: ${f.toDisplayString(object)}`
     ).join(' ')
-    console.info(`Added user with ${idText}`)
+    console.info(`Added ${title} with ${idText}`)
   });
 
   const deleteCommand = crudSubCommand

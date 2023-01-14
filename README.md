@@ -3,11 +3,11 @@
 **Home-crafted identity and [OpenID Connect](https://openid.net/connect/) server**
 
 Created as a personal challenge to learn about OAuth & OIDC. Deployed as the
-identity server for my self-hosted apps. Because it's completely custom, it has
-some neat features like:
+identity server for my self-hosted apps. Because it's completely custom, I was
+able to add some neat features:
 - A command-line interface for managing users and clients (used by my server
   automation/provisioning scripts)
-- Automatic key creation (JWKS and JWT)
+- Automatic JWKS and JWT key creation using [jose](https://www.npmjs.com/package/jose)
 - Native support for nginx's
   [auth_request](https://docs.nginx.com/nginx/admin-guide/security-controls/configuring-subrequest-authentication/)
   module

@@ -13,11 +13,10 @@ import { fileURLToPath } from 'url';
 import { createDb } from "./db/create.mjs";
 import { crudInsert } from "./db/crud.mjs";
 import * as dbUser from "./db/lastAdmin.mjs";
-import * as dbSecret from "./db/secret.mjs";
 import { userCrudConfig } from "./model.mjs";
 import { createOidcProvider } from "./oidc.mjs";
 import { createRouter } from "./routes.mjs";
-import { generateJwtSecret } from "./util/jwt.mjs";
+import { DEFAULT_MINIMUM_REFRESH_INTERVAL_S, Ip2asn } from "./util/ip2asn.js";
 import parseIntOrFail from "./util/parseIntOrFail.mjs";
 import { hashPassword } from "./util/password.mjs";
 import { ReqError } from "./util/ReqError.mjs";
@@ -60,25 +59,35 @@ const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
   next()
 }
 
-async function createApp(db: TDatabase, trustProxy?: boolean | string) {
-  const jwtSecret = await dbSecret.getOrElseSet(
-    db, 'Login Session JWT Secret', async () => generateJwtSecret(), s => s, s => s
-  )
-  const {
-    provider: oidcProvider, config: oidcConfig
-  } = await createOidcProvider(db, PUBLIC_BASE_URL, jwtSecret)
-  const router = await createRouter(db, oidcProvider, oidcConfig, jwtSecret)
-  oidcProvider.proxy = true
+async function createApp(
+  db: TDatabase,
+  cacheDir: string,
+  trustProxy?: boolean | string
+) {
   const mainExecDir = path.dirname(fileURLToPath(import.meta.url))
   const staticFilesDir = path.join(mainExecDir, 'static')
+
+  const {
+    provider: oidcProvider, config: oidcConfig
+  } = await createOidcProvider(db, PUBLIC_BASE_URL)
+  const ip2asn = new Ip2asn(
+    DEFAULT_MINIMUM_REFRESH_INTERVAL_S,
+    path.join(cacheDir, 'ip2asn')
+  )
+  const countriesGeoJson = JSON.parse(readFileSync(
+    path.join(staticFilesDir, 'countries.geojson'),
+    'utf8'
+  ))
+  const router = await createRouter(db, ip2asn, countriesGeoJson, oidcProvider, oidcConfig)
+  oidcProvider.proxy = true
 
   const app = express().use(
     helmet(),
     express.static(staticFilesDir),
     cookieParser(),
     rateLimit({
-      windowMs: 15 * 60 * 1000, // 5 minutes
-      max: 60,
+      windowMs: 5 * 60 * 1000,
+      max: 140,
       handler: (req, _res, _next, _options) => {
         req.socket.destroy()
       }
@@ -107,15 +116,40 @@ program
     or a list of IP addresses as per
     https://expressjs.com/en/guide/behind-proxies.html
   `, false)
-  .option('--db <path>', 'Path to database file', 'db.sqlite')
-  .option('--pid-file <path>', 'Path to PID file')
+  .option(
+    '--db <path>',
+    'Path to database file, defaults to $STATE_DIRECTORY/db.sqlite3 '
+    + 'or /var/lib/tijmid/db.sqlite3',
+    path.join(
+      process.env.STATE_DIRECTORY ?? '/var/lib/tijmid',
+      'db.sqlite3'
+    )
+  )
+  .option(
+    '--cache-dir <path>',
+    'Path to cache directory, defaults to $CACHE_DIRECTORY or /var/cache/tijmid',
+    process.env.CACHE_DIRECTORY ?? '/var/cache/tijmid'
+  )
+  .option(
+    '--pid-file <path>',
+    'Path to PID file or an empty string to disable, '
+    + 'defaults to $RUNTIME_DIRECTORY/pid or /run/tijmid/pid'
+  ) 
 
 program.parse()
 const opts = program.opts()
 
-if (opts.pidFile != null) {
+const pidFilePath = opts.pidFile != null
+  ? opts.pidFile.length > 0
+    ? opts.pidFile
+    : null
+  : process.env.RUNTIME_DIRECTORY != null
+    ? path.join(process.env.RUNTIME_DIRECTORY, 'pid')
+    : '/run/tijmid/pid'
+
+if (pidFilePath != null) {
   const oldPidString = (() => {try {
-    return readFileSync(opts.pidFile, 'utf-8')
+    return readFileSync(pidFilePath, 'utf-8')
   } catch (error) {
     if ((error as any).code == 'ENOENT') {
       return null
@@ -138,7 +172,7 @@ if (opts.pidFile != null) {
       process.kill(oldPid)
     }
   }
-  writeFileSync(opts.pidFile, process.pid.toString())
+  writeFileSync(pidFilePath, process.pid.toString())
 }
 
 function listenOn(app: Express, socketFileOrPort: string | number) {
@@ -163,5 +197,5 @@ function listenOn(app: Express, socketFileOrPort: string | number) {
 
 const db = await createDb(opts.db)
 createLastAdminIfNecessary(db)
-const app = await createApp(db, opts.trustProxy)
+const app = await createApp(db, opts.cacheDir, opts.trustProxy)
 listenOn(app, opts.listenSocket ?? opts.listenPort)

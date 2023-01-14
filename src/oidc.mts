@@ -1,14 +1,15 @@
-import { Provider, errors as oidcErrors, Configuration } from "oidc-provider";
+import { Provider, errors as oidcErrors, Configuration, KoaContextWithOIDC } from "oidc-provider";
 import createOidcAdapter from "./db/oidcAdapter.mjs"
 import { Database } from "better-sqlite3";
 import * as dbSecret from "./db/secret.mjs";
 import * as pages from "./view/pages.mjs"
-import { generateJwtSecret, LoginRequired, LOGIN_JWT_KEY, sessionFromLoginJwt } from "./util/jwt.mjs";
-import { crudGet } from "./db/crud.mjs";
+import { generateJwtSecret, LOGIN_SESSION_TOKEN_KEY } from "./util/jwt.mjs";
+import { crudDelete, crudGet } from "./db/crud.mjs";
 import { uuidFromString, uuidToString } from "./util/uuidUtil.mjs";
-import { User, clientCrudConfig, userCrudConfig } from "./model.mjs";
+import { User, clientCrudConfig, userCrudConfig, loginSessionCrudConfig } from "./model.mjs";
 import * as dbInvalidatedTokens from "./db/invalidatedTokens.mjs"
 import { generateJwks } from "./util/jwks.mjs";
+import { LoginRequired, sessionDataFromToken } from "./util/session.mjs";
 
 
 export const OIDC_COOKIE_NAMES = {
@@ -37,7 +38,8 @@ export function userToClaims(user: User) {
 }
 
 export async function createOidcProvider(
-  db: Database, public_base_url: string, loginJwtSecret: string
+  db: Database,
+  public_base_url: string
 ) {
   const jwks = await dbSecret.getOrElseSet(
     db, 'OIDC JWKS', generateJwks, JSON.stringify, JSON.parse
@@ -56,12 +58,6 @@ export async function createOidcProvider(
           const formOpen = form.slice(0, iFormEnd)
           const formClose = form.slice(iFormEnd)
           ctx.body = pages.rpInitiatedLogoutConfirm(ctx.host, formOpen, formClose)
-        },
-        onConfirmed(ctx) {
-          const session = sessionFromLoginJwt(db, loginJwtSecret, ctx.cookies.get(LOGIN_JWT_KEY))
-          if (session instanceof LoginRequired) { return }
-          dbInvalidatedTokens.invalidate(db, session.tokenUuid, session.tokenExp)
-          ctx.cookies.set(LOGIN_JWT_KEY, null)
         },
       }
     },
@@ -147,5 +143,13 @@ export async function createOidcProvider(
       ctx.body = pages.error("OIDC Error", 500, "OIDC Error")
     },
   }
-  return { config, provider: new Provider(public_base_url, config) }
+  const provider = new Provider(public_base_url, config)
+  provider.on('end_session.success', (ctx: KoaContextWithOIDC) => {
+    const sessionData = sessionDataFromToken(db, ctx.cookies.get(LOGIN_SESSION_TOKEN_KEY))
+    if (sessionData instanceof LoginRequired) { return }
+    const token = sessionData.loginSession.token
+    crudDelete(loginSessionCrudConfig, db, { token }, 'token = :token')
+    ctx.cookies.set(LOGIN_SESSION_TOKEN_KEY, null)
+  })
+  return { config, provider }
 }
