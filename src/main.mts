@@ -81,14 +81,22 @@ async function createApp(
   const router = await createRouter(db, ip2asn, countriesGeoJson, oidcProvider, oidcConfig)
   oidcProvider.proxy = true
 
+  const rateLimitedIpsLastLogged: Record<string, number> = {}
+
   const app = express().use(
     helmet(),
     express.static(staticFilesDir),
     cookieParser(),
     rateLimit({
-      windowMs: 5 * 60 * 1000,
+      windowMs: 4 * 60 * 1000,
       max: 140,
       handler: (req, _res, _next, _options) => {
+        const now = Date.now()
+        if (rateLimitedIpsLastLogged[req.ip] == null
+            || now - rateLimitedIpsLastLogged[req.ip] > 2 * 60 * 1000) {
+          rateLimitedIpsLastLogged[req.ip] = now
+          console.warn(`Rate limited ${req.ip}`)
+        }
         req.socket.destroy()
       }
     }),
