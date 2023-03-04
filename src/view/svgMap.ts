@@ -1,5 +1,5 @@
 import createGeojson2svgConverter from "geojson2svg"
-import { html } from "./html.mjs"
+import { html } from "./html.js"
 import bbox from "geojson-bbox";
 import { extract } from "../util/array.js";
 
