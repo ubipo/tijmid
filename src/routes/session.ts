@@ -14,8 +14,7 @@ export function createSessionRouter(
   countriesGeoJson: any,
 ) {
   return Router()
-    .use(loginHandler)
-    .get('/session', expressAsync(async (req, res) => {
+    .get('/session', loginHandler, expressAsync(async (req, res) => {
       const sessionData = getSessionData(res)
       const loginSessionsWithGrants = getLoginSessionsAndGrantsByUserUuid(db, sessionData.user.uuid)
       const sessionsPage = await pages.sessions(
@@ -27,13 +26,13 @@ export function createSessionRouter(
       )
       res.send(sessionsPage)
     }))
-    .post('/session/:slug/end', expressAsync(async (req, res) => {
+    .post('/session/:slug/end', loginHandler, expressAsync(async (req, res) => {
       const sessionData = getSessionData(res)
       const sessionToEndUuid = slugToUuid(req.params.slug)
       deleteLoginSessionByUuid(db, sessionData.user.uuid, sessionToEndUuid)
       res.redirect('/session')
     }))
-    .post('/session/end-all-others', expressAsync(async (req, res) => {
+    .post('/session/end-all-others', loginHandler, expressAsync(async (req, res) => {
       const sessionData = getSessionData(res)
       deleteAllLoginSessionsExcept(
         db, sessionData.user.uuid, sessionData.loginSession.uuid

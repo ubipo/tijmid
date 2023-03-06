@@ -62,12 +62,11 @@ async function login(
   return user
 }
 
-export function addLoginRoutes(
+export function createLoginRouter(
   db: Database,
   oidcProvider: Provider,
-  router: Router,
 ) {
-  router
+  return Router()
     .get("/login", expressAsync(async (req, res) => {
       const sessionData = (res as MaybeUnauthenticatedResponse).locals.sessionData
       if (sessionData instanceof LoginRequired) {

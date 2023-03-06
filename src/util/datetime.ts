@@ -4,13 +4,15 @@ import { TaiConverter, MODELS } from 't-a-i'
 
 const taiConverter = TaiConverter(MODELS.STALL)
 
-export function now() {
+export const nowUTCMillis = () => Date.now()
+
+export function nowTaiMillis() {
     // From the docs: "with the STALL model, one particular input Unix
     // millisecond count corresponds to a closed range of TAI millisecond
     // counts. The last TAI millisecond count in the range, at the end of the
     // inserted time, is returned."
     // https://www.npmjs.com/package/t-a-i
-    return taiConverter.unixToAtomic(Date.now(), { range: false })
+    return taiConverter.unixToAtomic(nowUTCMillis(), { range: false })
 }
 
 export function millisToNanos(millis: number) {

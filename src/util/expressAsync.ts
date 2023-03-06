@@ -17,8 +17,12 @@ export function expressAsync<
     ) {
         const fnReturn = block(...args)
         const next = args[args.length - 1] as core.NextFunction
-        if (fnReturn instanceof Promise) {
-            fnReturn.then(next).catch(next)
+        if (!(fnReturn instanceof Promise)) {
+            next()
+            return
         }
+
+        fnReturn.then(() => next()).catch(next)
+        return
     }
 }

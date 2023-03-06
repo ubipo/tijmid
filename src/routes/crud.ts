@@ -26,18 +26,17 @@ export function createCrudRouter<T>(
   ...handlers: RequestHandler[]
 ) {
   return Router()
-    .use(...handlers)
-    .get(config.collectionUrl, expressAsync((_req, res) => {
+    .get(config.collectionUrl, ...handlers, expressAsync((_req, res) => {
       const sessionData = getSessionData(res)
       const objects = crudAll(config, db)
       res.send(pages.crudList(config, sessionData.user, objects))
     }))
-    .post(config.collectionUrl, urlencodedParser, expressAsync(async (req, res) => {
+    .post(config.collectionUrl, ...handlers, urlencodedParser, expressAsync(async (req, res) => {
       const object = await config.fromParams(req.body)
       crudInsert(config, db, object)
       res.redirect(303, "")
     }))
-    .get(`${config.objectTemplateUrl}/delete`, (req, res) => {
+    .get(`${config.objectTemplateUrl}/delete`, ...handlers, (req, res) => {
       const whereParams = config.objectUrlParamsToWhereParams(req.params)
       const object = crudGet(config, db, whereParams)
       if (object == null) throw new NotFound(
@@ -45,7 +44,7 @@ export function createCrudRouter<T>(
       )
       res.send(pages.crudDelete(config, object))
     })
-    .post(`${config.objectTemplateUrl}/delete`, urlencodedParser, expressAsync(async (req, res) => {
+    .post(`${config.objectTemplateUrl}/delete`, ...handlers, urlencodedParser, expressAsync(async (req, res) => {
       const dropDependencies = ['true', '1', 'on'].includes(String(req.body.dropDependencies).toLowerCase())
       const whereParams = config.objectUrlParamsToWhereParams(req.params)
       const state = (() => { try {
@@ -65,7 +64,7 @@ export function createCrudRouter<T>(
       )
       res.redirect(303, "..")
     }))
-    .get(`${config.objectTemplateUrl}/edit`, (req, res) => {
+    .get(`${config.objectTemplateUrl}/edit`, ...handlers, (req, res) => {
       const whereParams = config.objectUrlParamsToWhereParams(req.params)
       const object = crudGet(config, db, whereParams)
       if (object == null) throw new NotFound(
@@ -73,7 +72,7 @@ export function createCrudRouter<T>(
       )
       res.send(pages.crudEdit(config, object))
     })
-    .post(`${config.objectTemplateUrl}/edit`, urlencodedParser, expressAsync(async (req, res) => {
+    .post(`${config.objectTemplateUrl}/edit`, ...handlers, urlencodedParser, expressAsync(async (req, res) => {
       const whereParams = config.objectUrlParamsToWhereParams(req.params)
       const previous = crudGet(config, db, whereParams)
       const object = await config.fromParams(req.body, previous ?? undefined)

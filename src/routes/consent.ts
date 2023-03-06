@@ -15,9 +15,10 @@ import urlencodedParser from "./urlencodedParser.js"
 import * as pages from "../view/pages.js"
 import { Database } from "better-sqlite3"
 import { EncryptJWT, jwtDecrypt } from "jose"
-import { SubrequestAuthJwtPayload } from "../service/subrequest.js"
+import { SubrequestAuthJwtPayload, SUBREQUEST_TOKEN_MAXAGE } from "../service/subrequest.js"
 import { deleteLoginSessionSubrequestHost, insertLoginSessionSubrequestHost } from "../db/subrequestAuth.js"
 import { urlToNormalizedHost } from "../util/url.js"
+import { nowTaiMillis } from "../util/datetime.js"
 
 async function getSubrequestHostJwtPayload(
   loginSession: LoginSession,
@@ -43,8 +44,7 @@ export function createConsentRouter(
   oidcProvider: OidcProvider,
 ) {
   return Router()
-    .use(loginHandler)
-    .get('/consent', expressAsync(async (req, res) => {
+    .get('/consent', loginHandler, expressAsync(async (req, res) => {
       const sessionData = getSessionData(res)
       const searchParams = new URL(req.url, 'http://dummy').searchParams
       const subrequestAuthNextUrlOrErr = getMaybeOneSearchParam(
@@ -61,16 +61,18 @@ export function createConsentRouter(
         if (subrequestHostFromDb == null) {
           throw new BadReq("Consent", "Invalid subrequest host")
         }
+        const nowSeconds = Math.floor(nowTaiMillis() / 1000)
+        const exp = nowSeconds + SUBREQUEST_TOKEN_MAXAGE.total('seconds')
         const tokenPayload: SubrequestAuthJwtPayload = {
           nextUrl: nextUrl.toString(),
           loginSession: uuidToString(sessionData.loginSession.uuid),
-          iat: Math.floor(Date.now() / 1000),
+          iat: nowSeconds,
         }
         const token = await new EncryptJWT(tokenPayload)
           .setProtectedHeader({ alg: 'dir', enc: 'A128CBC-HS256' })
           .setIssuer(subrequestAuthIssuerUrn)
           .setAudience(subrequestAuthIssuerUrn)
-          .setExpirationTime('2h')
+          .setExpirationTime(exp)
           .encrypt(subrequestHostJwtSecret)
         console.log('Subrequest host JWT: ', tokenPayload)
         const consentParams: pages.SubrequestAuthConsentParams = {
@@ -113,7 +115,7 @@ export function createConsentRouter(
         res.send(pages.consent(consentParams))
       }
     }))
-    .post('/consent', urlencodedParser, expressAsync(async (req, res) => {
+    .post('/consent', loginHandler, urlencodedParser, expressAsync(async (req, res) => {
       const sessionData = getSessionData(res)
       const { action, token } = getParams(
         "Consent", req.body,

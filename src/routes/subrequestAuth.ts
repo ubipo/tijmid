@@ -1,7 +1,7 @@
 import { Router } from "express"
-import { jwtDecrypt } from "jose"
+import { jwtDecrypt, errors as joseErrors } from "jose"
 import { crudGet } from "../db/crud.js"
-import { loginSessionCrudConfig, subrequestAuthHostCrudConfig } from "../model.js"
+import { loginSessionCrudConfig } from "../model.js"
 import { LoginRequired, verifyLoginSession } from "../service/loginSession.js"
 import { SubrequestAuthJwtPayload, getSubrequestHostJwtKey, SUBREQUEST_TOKEN_MAXAGE } from "../service/subrequest.js"
 import { setCookie } from "../util/cookie.js"
@@ -21,23 +21,25 @@ export function createSubrequestAuthJwtHandler(
   const jwtKey = getSubrequestHostJwtKey(subrequestAuthIssuerUrn)
   return expressAsync(async (req, res) => {
     if (!req.path.startsWith("/subrequest-auth")) return
-    const jwtFromCookie = req.cookies[jwtKey]
-    if (jwtFromCookie == null) return
-    if (typeof jwtFromCookie !== 'string') {
+    const jwt = req.cookies[jwtKey]
+    if (jwt == null) return
+    if (typeof jwt !== 'string') {
       throw new BadReq(
         'Invalid subrequest auth token',
         `The subrequest auth token must be a string.`
       )
     }
-    const { payload } = await jwtDecrypt(jwtFromCookie, subrequestHostJwtSecret, {
-      issuer: subrequestAuthIssuerUrn,
-      audience: subrequestAuthIssuerUrn,
-    })
-    const subrequestAuthPayload = payload as SubrequestAuthJwtPayload
-    res.locals.subrequestAuthJwtAndPayload = {
-      jwt: jwtFromCookie,
-      payload: subrequestAuthPayload,
+    let payload: SubrequestAuthJwtPayload
+    try {
+      payload = (await jwtDecrypt(jwt, subrequestHostJwtSecret, {
+        issuer: subrequestAuthIssuerUrn,
+        audience: subrequestAuthIssuerUrn,
+      })).payload as SubrequestAuthJwtPayload
+    } catch (err) {
+      if (err instanceof joseErrors.JWTExpired) return
+      throw err
     }
+    res.locals.subrequestAuthJwtAndPayload = { jwt, payload }
   })
 }
 
@@ -77,11 +79,22 @@ export function createSubrequestAuthRouter(
       const { jwt, payload: jwtPayload } = jwtOrError != null
         ? await (async () => {
           const jwt = jwtOrError
-          const { payload } = await jwtDecrypt(jwt, subrequestHostJwtSecret, {
-            issuer: subrequestAuthIssuerUrn,
-            audience: subrequestAuthIssuerUrn,
-          })
-          return { payload: payload as SubrequestAuthJwtPayload, jwt}
+          let payload: SubrequestAuthJwtPayload
+          try {
+            payload = (await jwtDecrypt(jwt, subrequestHostJwtSecret, {
+              issuer: subrequestAuthIssuerUrn,
+              audience: subrequestAuthIssuerUrn,
+            })).payload as SubrequestAuthJwtPayload
+          } catch (err) {
+            if (err instanceof joseErrors.JWTExpired) {
+              throw new UnauthorizedReq(
+                'Expired subrequest auth token',
+                `The subrequest auth token has expired.`
+              )
+            }
+            throw err
+          }
+          return { payload, jwt}
         })()
         : (() => {
           const cookieJwtAndPayload = res.locals.subrequestAuthJwtAndPayload
@@ -121,7 +134,10 @@ export function createSubrequestAuthRouter(
 
       res.send('ok')
     } catch (err) {
-      console.error('Error in subrequest-auth', err)
+      if (err instanceof UnauthorizedReq) {
+        throw err
+      }
+      console.error('Unknown error in subrequest-auth', err)
       throw err
     }
   }))

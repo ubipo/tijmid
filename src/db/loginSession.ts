@@ -2,7 +2,7 @@ import { Temporal } from "@js-temporal/polyfill";
 import { Database } from "better-sqlite3"
 import { randomBytes } from "crypto";
 import { LoginSession, loginSessionCrudConfig, userCrudConfig } from "../model.js"
-import { now } from "../util/datetime.js";
+import { nowTaiMillis } from "../util/datetime.js";
 import { generateUuid, Uuid, uuidToString } from "../util/uuidUtil.js"
 import { crudColumnsClausePart, crudInsert } from "./crud.js"
 import { sql } from "./sql.js"
@@ -68,7 +68,7 @@ export async function insertLoginSession(
     uuid: generateUuid(),
     token: randomBytes(32),
     user: userUuid,
-    created: now(),
+    created: nowTaiMillis(),
     ipAddress: ipAddress
   }
   await crudInsert(loginSessionCrudConfig, db, loginSession)
@@ -101,7 +101,7 @@ export async function deleteExpiredLoginSessions(
   db: Database,
   maxAge: Temporal.Duration
 ) {
-  const maxCreatedTime = now() - maxAge.total('millisecond')
+  const maxCreatedTime = nowTaiMillis() - maxAge.total('millisecond')
   db.prepare(sql`
     DELETE FROM login_session
     WHERE created < :maxCreatedTime

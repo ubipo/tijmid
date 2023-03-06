@@ -6,7 +6,7 @@ import { adminHandler, loginHandler } from "./accessHandlers.js";
 import { createConsentRouter } from "./consent.js";
 import { createCrudRouter } from "./crud.js";
 import { createHomeRouter } from "./home.js";
-import { addLoginRoutes } from "./login.js";
+import { createLoginRouter } from "./login.js";
 import { createLogoutRouter } from "./logout.js";
 import { createSessionRouter } from "./session.js";
 import { createSubrequestAuthRouter } from "./subrequestAuth.js";
@@ -37,7 +37,7 @@ export async function createRouter(
   oidcConfig: Configuration,
 ) {
   const router = Router()
-  addLoginRoutes(db, oidcProvider, router)
+  router.use(createLoginRouter(db, oidcProvider))
 
   // Logged in routes
   router.use(createHomeRouter())
@@ -51,7 +51,6 @@ export async function createRouter(
     subrequestAuthIssuerUrn, subrequestAuthJwtSecret, db
   ))
   
-
   // Admin routes
   router.use(createCrudRouter(userCrudConfig, db, loginHandler, adminHandler))
   router.use(createCrudRouter(clientCrudConfig, db, loginHandler, adminHandler))
@@ -79,7 +78,7 @@ export async function createRouter(
   }
   router.use(errorHandler)
 
-  const isRateLimitExempt = (_req: Request, res: Response) => {
+  const isRateLimitExempt = (req: Request, res: Response) => {
     const sessionData = (res as MaybeUnauthenticatedResponse).locals.sessionData
     const isAuthenticated = sessionData != null && !(sessionData instanceof LoginRequired)
     if (isAuthenticated) return true

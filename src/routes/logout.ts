@@ -8,8 +8,7 @@ import { loginHandler } from "./accessHandlers.js"
 
 export function createLogoutRouter(db: Database) {
   return Router()
-    .use(loginHandler)
-    .post('/logout', expressAsync(async (_req, res) => {
+    .post('/logout', loginHandler, expressAsync(async (_req, res) => {
       const sessionData = getSessionData(res)
       const token = sessionData.loginSession.token
       await crudDelete(loginSessionCrudConfig, db, { token }, 'token = :token')
