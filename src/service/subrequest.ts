@@ -1,8 +1,10 @@
 import { Temporal } from "@js-temporal/polyfill";
 import { JWTPayload } from "jose";
 
-
-export const SUBREQUEST_TOKEN_MAXAGE = Temporal.Duration.from('PT1H')
+// This can be quite long because the session is validated on every subrequest
+// Actually, it could be infinite. But having a max age is good for cleaning up
+// unused cookies + for algorithm rotation.
+export const SUBREQUEST_TOKEN_MAXAGE = Temporal.Duration.from('P100D')
 
 export function getSubrequestHostJwtKey(issuerUrn: string) {
   return `jwt-${encodeURIComponent(issuerUrn)}`
