@@ -3,7 +3,7 @@ import { Option, program } from "commander";
 import cookieParser from "cookie-parser";
 import { randomBytes } from "crypto";
 import endentImp from "endent";
-import express, { ErrorRequestHandler, Express } from "express";
+import express, { ErrorRequestHandler, Express, Request } from "express";
 import rateLimit from 'express-rate-limit';
 import { readFileSync, rmSync, writeFileSync } from "fs";
 import helmet from "helmet";
@@ -26,9 +26,13 @@ import { generateUuid } from "./util/uuidUtil.js";
 import * as pages from "./view/pages.js";
 import * as dbSecret from "./db/secret.js";
 import { generateJwtSecret } from "./util/jwt.js";
+import { Temporal } from "@js-temporal/polyfill";
 
 
 const endent = (endentImp as any).default
+
+const DEFAULT_RATE_LIMIT_WINDOW = Temporal.Duration.from("PT1M30S")
+const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 100
 
 async function createLastAdminIfNecessary(db: Database) {
   const adminCount = dbUser.adminCount(db)
@@ -66,7 +70,9 @@ async function createApp(
   baseUrl: string,
   db: TDatabase,
   cacheDir: string,
-  trustProxy?: boolean | string
+  rateLimitWindow: Temporal.Duration,
+  rateLimitMaxRequests: number,
+  trustProxy?: boolean | string,
 ) {
   const mainExecDir = path.dirname(fileURLToPath(import.meta.url))
   const staticFilesDir = path.join(mainExecDir, 'static')
@@ -105,8 +111,8 @@ async function createApp(
     sessionDataHandler,
     subrequestAuthJwtHandler,
     rateLimit({
-      windowMs: 4 * 60 * 1000,
-      max: 200,
+      windowMs: rateLimitWindow.total('milliseconds'),
+      max: rateLimitMaxRequests,
       handler: (req, _res, _next, _options) => {
         const now = Date.now()
         const lastLogged = rateLimitedIpsLastLogged[req.ip]
@@ -116,9 +122,7 @@ async function createApp(
         }
         req.socket.destroy()
       },
-      skip: (req, res) => {
-        return isRateLimitExempt(req, res as Response)
-      }
+      skip: (req, res) => isRateLimitExempt(req, res as Response)
     }),
     router,
     errorHandler,
@@ -169,6 +173,13 @@ program
     'Path to PID file or an empty string to disable, '
     + 'defaults to $RUNTIME_DIRECTORY/pid or /run/tijmid/pid'
   ) 
+  .option(
+    '--rate-limit <path>',
+    'Rate limit window size (as ISO8601 duration) and max requests per window, ' +
+    'separated by a comma. Defaults to ' +
+    `${DEFAULT_RATE_LIMIT_WINDOW},${DEFAULT_RATE_LIMIT_MAX_REQUESTS}. ` +
+    'See: https://en.wikipedia.org/wiki/ISO_8601#Durations'
+  )
 
 program.parse()
 const opts = program.opts()
@@ -229,7 +240,24 @@ function listenOn(app: Express, socketFileOrPort: string | number) {
   app.listen(port, () => { console.log(`Listening on TCP port ${port}`)});
 }
 
+const [rateLimitWindow, rateLimitMaxRequests] = opts.rateLimit == null
+  ? [DEFAULT_RATE_LIMIT_WINDOW, DEFAULT_RATE_LIMIT_MAX_REQUESTS]
+  : (() => {
+    const [windowStr, maxRequestsStr] = opts.rateLimit.split(',', 2)
+    if (windowStr == null || maxRequestsStr == null) {
+      throw new Error('Invalid rate limit')
+    }
+    return [Temporal.Duration.from(windowStr), parseIntOrFail(maxRequestsStr)]
+  })()
+
 const db = await createDb(opts.db)
 createLastAdminIfNecessary(db)
-const app = await createApp(opts.baseUrl, db, opts.cacheDir, opts.trustProxy)
+const app = await createApp(
+  opts.baseUrl,
+  db,
+  opts.cacheDir,
+  rateLimitWindow,
+  rateLimitMaxRequests,
+  opts.trustProxy,
+)
 listenOn(app, opts.listenSocket ?? opts.listenPort)
