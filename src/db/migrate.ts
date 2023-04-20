@@ -35,7 +35,7 @@ const MIGRATIONS = (db: Database) => [
         consumed INTEGER NOT NULL DEFAULT FALSE,
         expiration INTEGER NOT NULL,
         PRIMARY KEY (model, id)
-      );
+      ) STRICT;
       CREATE TABLE client (
         uuid BLOB PRIMARY KEY,
         id TEXT,
