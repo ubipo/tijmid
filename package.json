@@ -50,7 +50,7 @@
     "jose": "^4.13.1",
     "jsonwebtoken": "^9.0.0",
     "libsodium-wrappers": "^0.7.11",
-    "oidc-provider": "^8.1.1",
+    "oidc-provider": "^8.1.2",
     "t-a-i": "^3.0.6",
     "uuid": "^9.0.0"
   }
