@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@js-temporal/polyfill": "^0.4.3",
-    "better-sqlite3": "^8.3.0",
+    "better-sqlite3": "^8.4.0",
     "body-parser": "^1.20.2",
     "chalk": "^5.2.0",
     "commander": "^10.0.1",
